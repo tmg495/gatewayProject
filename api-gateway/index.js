@@ -1,11 +1,13 @@
 const express = require('express');
 // const fetch = require('node-fetch');
-const basicAuth = require('basic-auth')
-const jwt = require('jsonwebtoken')
-const bodyParser = require('body-parser')
-const rateLimit = require('express-rate-limit')
+const basicAuth = require('basic-auth');
+const jwt = require('jsonwebtoken');
+const bodyParser = require('body-parser');
+const rateLimit = require('express-rate-limit');
+const NodeCache = require('node-cache');
+const myCache = new NodeCache();
 
-const jwtSecret = "coffeebridgeradio"
+const jwtSecret = "coffeebridgeradio";
 const app = express();
 const PORT = 3002;
 
@@ -57,6 +59,16 @@ const limiter = rateLimit({
     },
 })
 
+const apiKeyMiddleware = (req, res, next) => {
+    const apiKey = req.headers['x-api-key']
+
+    if (!apiKey || apiKey !== 'fieldgreenalbert') {
+        return res.status(401).json({ message: 'Unauthorized - Invalid API key' });
+    }
+
+    next();
+}
+
 app.use(bodyParser.json());
 app.use(limiter);
 
@@ -72,16 +84,33 @@ app.post('/auth', limiter, (req, res) => {
     }
 })
 
-app.get('/users/:id', limiter, authMiddleware, async (req, res) => {
+app.get('/users/:id', limiter, apiKeyMiddleware, async (req, res) => {
     const response = await fetch(`http://localhost:3000/users/${req.params.id}`);
     const data = await response.json();
     res.json(data);
 })
 
 app.get('/products/:id', limiter, jwtAuthMiddleware, async (req, res) => {
-    const response = await fetch(`http://localhost:3001/products/${req.params.id}`);
-    const data = await response.json();
-    res.json(data);
+    const productId = req.params.id;
+    const cachedData = myCache.get(productId);
+
+    if (cachedData) {
+        console.log("Serving from cache");
+        res.json(cachedData);
+        return;
+    }
+
+    try {
+        const response = await fetch(`http://localhost:3001/products/${productId}`);
+        const data = await response.json();
+        myCache.set(productId, data, 60); //Cache 60 seconds
+        res.json(data);
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        res.status(500).json({ message: "Error fetching data"});
+    }
+
+    
 })
 
 app.get(`/userProducts/:userId`, limiter, async (req, res) => {
