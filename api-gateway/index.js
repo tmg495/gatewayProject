@@ -3,11 +3,11 @@ const express = require('express');
 const basicAuth = require('basic-auth')
 const jwt = require('jsonwebtoken')
 const bodyParser = require('body-parser')
+const rateLimit = require('express-rate-limit')
+
 const jwtSecret = "coffeebridgeradio"
 const app = express();
 const PORT = 3002;
-
-app.use(bodyParser.json())
 
 const authMiddleware = (req, res, next) => {
     const credentials = basicAuth(req);
@@ -46,7 +46,21 @@ const authenticate = (username, password) => {
     return false
 }
 
-app.post('/auth', (req, res) => {
+const limiter = rateLimit({
+    windowMs: 15*60*1000, //15min in milliseconds
+    max: 100, // Limit each IP to 100 requests per `windowMs`
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    message: { // Custom response body
+        status: 429,
+        message: "Too many requests, please try again later."
+    },
+})
+
+app.use(bodyParser.json());
+app.use(limiter);
+
+app.post('/auth', limiter, (req, res) => {
     console.log(req.body)
     const {username, password} = req.body;
 
@@ -58,19 +72,19 @@ app.post('/auth', (req, res) => {
     }
 })
 
-app.get('/users/:id', authMiddleware, async (req, res) => {
+app.get('/users/:id', limiter, authMiddleware, async (req, res) => {
     const response = await fetch(`http://localhost:3000/users/${req.params.id}`);
     const data = await response.json();
     res.json(data);
 })
 
-app.get('/products/:id', jwtAuthMiddleware, async (req, res) => {
+app.get('/products/:id', limiter, jwtAuthMiddleware, async (req, res) => {
     const response = await fetch(`http://localhost:3001/products/${req.params.id}`);
     const data = await response.json();
     res.json(data);
 })
 
-app.get(`/userProducts/:userId`, async (req, res) => {
+app.get(`/userProducts/:userId`, limiter, async (req, res) => {
     try {
         const userResponse = await fetch(`http://localhost:3000/users/${req.params.userId}`);
         const userData = await userResponse.json();
