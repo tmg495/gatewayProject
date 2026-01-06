@@ -1,8 +1,13 @@
 const express = require('express');
 // const fetch = require('node-fetch');
 const basicAuth = require('basic-auth')
+const jwt = require('jsonwebtoken')
+const bodyParser = require('body-parser')
+const jwtSecret = "coffeebridgeradio"
 const app = express();
 const PORT = 3002;
+
+app.use(bodyParser.json())
 
 const authMiddleware = (req, res, next) => {
     const credentials = basicAuth(req);
@@ -14,6 +19,24 @@ const authMiddleware = (req, res, next) => {
     next();
 }
 
+const jwtAuthMiddleware = (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1]
+
+    if (!token) {
+        return res.sendStatus(401)
+    }
+
+    try {
+        const decoded = jwt.verify(token, jwtSecret)
+        req.user = decoded;
+
+        next()
+    } catch (err) {
+        console.error('Invalid token:', err)
+        return res.sendStatus(401)
+    }
+}
+
 const authenticate = (username, password) => {
 
     if (username === 'admin' && password == 'password') {
@@ -23,13 +46,25 @@ const authenticate = (username, password) => {
     return false
 }
 
+app.post('/auth', (req, res) => {
+    console.log(req.body)
+    const {username, password} = req.body;
+
+    if (authenticate(username, password)) {
+        const token = jwt.sign( { username }, jwtSecret);
+        res.json({ token });
+    } else {
+        res.status(401).json({message: "invalid credentials"})
+    }
+})
+
 app.get('/users/:id', authMiddleware, async (req, res) => {
     const response = await fetch(`http://localhost:3000/users/${req.params.id}`);
     const data = await response.json();
     res.json(data);
 })
 
-app.get('/products/:id', async (req, res) => {
+app.get('/products/:id', jwtAuthMiddleware, async (req, res) => {
     const response = await fetch(`http://localhost:3001/products/${req.params.id}`);
     const data = await response.json();
     res.json(data);
