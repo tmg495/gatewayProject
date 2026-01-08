@@ -2,7 +2,6 @@ const express = require('express');
 // const fetch = require('node-fetch');
 const basicAuth = require('basic-auth');
 const jwt = require('jsonwebtoken');
-const bodyParser = require('body-parser');
 const rateLimit = require('express-rate-limit');
 const NodeCache = require('node-cache');
 const myCache = new NodeCache();
@@ -69,11 +68,10 @@ const apiKeyMiddleware = (req, res, next) => {
     next();
 }
 
-app.use(bodyParser.json());
+app.use(express.json());
 app.use(limiter);
 
 app.post('/auth', limiter, (req, res) => {
-    console.log(req.body)
     const {username, password} = req.body;
 
     if (authenticate(username, password)) {
@@ -87,24 +85,27 @@ app.post('/auth', limiter, (req, res) => {
 app.get('/users/:id', limiter, apiKeyMiddleware, async (req, res) => {
     const response = await fetch(`http://localhost:3000/users/${req.params.id}`);
     const data = await response.json();
-    res.json(data);
+    const {status} = response;
+    res.status(status).json(data);
 })
 
 app.get('/products/:id', limiter, jwtAuthMiddleware, async (req, res) => {
     const productId = req.params.id;
-    const cachedData = myCache.get(productId);
+    const cachedRes = myCache.get(productId);
 
-    if (cachedData) {
+    if (cachedRes) {
         console.log("Serving from cache");
-        res.json(cachedData);
+        const {data: cachedData, status: cachedStatus} = cachedRes;
+        res.status(cachedStatus).json(cachedData);
         return;
     }
 
     try {
         const response = await fetch(`http://localhost:3001/products/${productId}`);
         const data = await response.json();
-        myCache.set(productId, data, 60); //Cache 60 seconds
-        res.json(data);
+        const {status} = response;
+        myCache.set(productId, {data, status}, 60); //Cache 60 seconds
+        res.status(status).json(data);
     } catch (error) {
         console.error("Error fetching data:", error);
         res.status(500).json({ message: "Error fetching data"});
@@ -113,10 +114,11 @@ app.get('/products/:id', limiter, jwtAuthMiddleware, async (req, res) => {
     
 })
 
-app.get(`/userProducts/:userId`, limiter, async (req, res) => {
+app.get(`/userProducts/:userId`, limiter, apiKeyMiddleware, async (req, res) => {
     try {
         const userResponse = await fetch(`http://localhost:3000/users/${req.params.userId}`);
         const userData = await userResponse.json();
+        const {status} = userResponse;
 
         const productIds = userData.products || [];
         const productPromises = productIds.map(productId => fetch(`http://localhost:3001/products/${productId}`));
@@ -128,7 +130,7 @@ app.get(`/userProducts/:userId`, limiter, async (req, res) => {
             products: productData.length > 0 ? productData : []
         }
 
-        res.json(combinedData);
+        res.status(status).json(combinedData);
     } catch (error) {
         console.error("Error fetching data:", error);
         res.status(500).json({ message: "Error fetching data"});
